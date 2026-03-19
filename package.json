@@ -1,0 +1,12 @@
+{
+  "name": "confirmo-codex-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local bridge that derives live Codex CLI status for Confirmo.",
+  "scripts": {
+    "bridge": "node bin/codex-bridge.js",
+    "once": "node bin/codex-bridge.js --once --verbose",
+    "install": "node bin/install.js",
+    "patch-confirmo": "node bin/patch-confirmo.js"
+  }
+}
