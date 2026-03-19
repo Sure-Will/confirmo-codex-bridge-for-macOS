@@ -47,19 +47,17 @@ To test one cycle without launchd:
 node bin/codex-bridge.js --once --verbose
 ```
 
-## Optional Confirmo Patch
+## Confirmo Patch Status
 
-To let Confirmo treat Codex `working` sessions like `agent-active`, run:
+`bin/patch-confirmo.js` is currently disabled on purpose.
 
-```bash
-node bin/patch-confirmo.js
-```
+A previous raw `app.asar` patch attempt caused Confirmo to crash on launch, so
+the safe state right now is:
 
-This script:
+- keep the sidecar bridge
+- keep the hook shim
+- do not patch the Electron archive until there is a proper asar-aware workflow
 
-- creates a backup of `app.asar`
-- patches the `CodexStatusMonitor` logic in place
-- keeps the archive byte length unchanged
+Backups created during local experiments are stored under:
 
-Because Confirmo updates can overwrite the patch, keeping this repo around makes
-re-applying the bridge straightforward after every update.
+- `~/.confirmo/codex-bridge/backups`
