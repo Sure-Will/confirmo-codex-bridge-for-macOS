@@ -1,4 +1,4 @@
-# confirmo-codex-bridge
+# confirmo-codex-bridge-for-macOS
 
 Local bridge that derives live Codex CLI status for Confirmo without waiting for
 official Codex lifecycle hooks to ship.

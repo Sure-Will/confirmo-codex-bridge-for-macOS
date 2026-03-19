@@ -1,5 +1,5 @@
 {
-  "name": "confirmo-codex-bridge",
+  "name": "confirmo-codex-bridge-for-macos",
   "private": true,
   "version": "0.1.0",
   "description": "Local bridge that derives live Codex CLI status for Confirmo.",
