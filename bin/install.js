@@ -9,12 +9,14 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const NODE_BIN = process.execPath;
 const BRIDGE_DIR = path.join(HOME, ".confirmo", "codex-bridge");
 const BACKUP_DIR = path.join(BRIDGE_DIR, "backups");
+const CONFIRMO_HOOKS_DIR = path.join(HOME, ".confirmo", "hooks");
+const CONFIRMO_HOOK_PATH = path.join(CONFIRMO_HOOKS_DIR, "confirmo-codex-hook.js");
 const LAUNCH_AGENTS_DIR = path.join(HOME, "Library", "LaunchAgents");
 const LAUNCH_AGENT_PATH = path.join(LAUNCH_AGENTS_DIR, "com.sure.confirmo.codex-bridge.plist");
 const CODEX_CONFIG_PATH = path.join(HOME, ".codex", "config.toml");
 const NOTIFY_COMMAND = [
   NODE_BIN,
-  path.join(REPO_ROOT, "bin", "codex-notify.js"),
+  CONFIRMO_HOOK_PATH,
 ];
 
 function ensureDir(dirPath) {
@@ -38,10 +40,23 @@ function renderNotifyBlock() {
   return [
     "notify = [",
     `  "${NOTIFY_COMMAND[0]}",`,
-    `  "${NOTIFY_COMMAND[1]}",`,
-    `  "${NOTIFY_COMMAND[2]}"`,
+    `  "${NOTIFY_COMMAND[1]}"`,
     "]",
   ].join("\n");
+}
+
+function writeConfirmoHookShim() {
+  ensureDir(CONFIRMO_HOOKS_DIR);
+  backupFile(CONFIRMO_HOOK_PATH);
+
+  const shim = [
+    "#!/usr/bin/env node",
+    "",
+    `require(${JSON.stringify(path.join(REPO_ROOT, "bin", "codex-notify.js"))});`,
+    "",
+  ].join("\n");
+
+  fs.writeFileSync(CONFIRMO_HOOK_PATH, shim);
 }
 
 function updateCodexConfig() {
@@ -107,10 +122,12 @@ function writeLaunchAgent() {
 
 function main() {
   writeLaunchAgent();
+  writeConfirmoHookShim();
   updateCodexConfig();
 
   console.log("Installed:");
   console.log(`- LaunchAgent: ${LAUNCH_AGENT_PATH}`);
+  console.log(`- Confirmo hook shim: ${CONFIRMO_HOOK_PATH}`);
   console.log(`- Codex notify hook: ${CODEX_CONFIG_PATH}`);
   console.log("");
   console.log("Next:");

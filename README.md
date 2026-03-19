@@ -9,14 +9,15 @@ official Codex lifecycle hooks to ship.
 - Reads rollout JSONL events from `~/.codex/sessions/...`
 - Derives `working`, `completed`, and `idle` session states
 - Writes Confirmo-compatible status files to `~/.confirmo/codex-status/`
-- Installs a tiny notify hook so Codex no longer fights with Confirmo's stock
-  `confirmo-codex-hook.js`
+- Installs a tiny shim at `~/.confirmo/hooks/confirmo-codex-hook.js` so Codex
+  forwards completions into this repo instead of fighting Confirmo's stock hook
 
 ## Repo Layout
 
 - `bin/codex-bridge.js`: long-running sidecar monitor
 - `bin/codex-notify.js`: lightweight notify hook owned by this repo
-- `bin/install.js`: installs the LaunchAgent and rewrites `~/.codex/config.toml`
+- `bin/install.js`: installs the LaunchAgent, rewrites `~/.codex/config.toml`,
+  and writes the Confirmo hook shim
 - `bin/patch-confirmo.js`: optional in-place patch for Confirmo's Codex monitor
 
 ## Why A Bridge Is Needed
@@ -40,6 +41,12 @@ node bin/install.js
 launchctl unload ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist 2>/dev/null || true
 launchctl load ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist
 ```
+
+What `install.js` changes:
+
+- writes `~/.confirmo/hooks/confirmo-codex-hook.js` as a repo-owned shim
+- points Codex `notify` at that shim in `~/.codex/config.toml`
+- installs `~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist`
 
 To test one cycle without launchd:
 

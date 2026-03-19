@@ -15,9 +15,10 @@ const OUTPUT_STATUS_FILE = path.join(OUTPUT_DIR, "status.json");
 const OUTPUT_SESSIONS_DIR = path.join(OUTPUT_DIR, "sessions");
 
 const POLL_MS = Number(process.env.CONFIRMO_CODEX_BRIDGE_POLL_MS || 1000);
-const ACTIVE_WINDOW_MS = Number(process.env.CONFIRMO_CODEX_ACTIVE_WINDOW_MS || 15000);
-const COMPLETE_TO_IDLE_MS = Number(process.env.CONFIRMO_CODEX_COMPLETE_TO_IDLE_MS || 5000);
-const STALE_IDLE_MS = Number(process.env.CONFIRMO_CODEX_STALE_IDLE_MS || 20000);
+const ACTIVE_WINDOW_MS = Number(process.env.CONFIRMO_CODEX_ACTIVE_WINDOW_MS || 90000);
+const COMPLETE_TO_IDLE_MS = Number(process.env.CONFIRMO_CODEX_COMPLETE_TO_IDLE_MS || 30000);
+const STALE_IDLE_MS = Number(process.env.CONFIRMO_CODEX_STALE_IDLE_MS || 120000);
+const IN_PROGRESS_IDLE_MS = Number(process.env.CONFIRMO_CODEX_IN_PROGRESS_IDLE_MS || 15 * 60 * 1000);
 const PRUNE_AFTER_MS = Number(process.env.CONFIRMO_CODEX_PRUNE_AFTER_MS || 24 * 60 * 60 * 1000);
 
 const args = new Set(process.argv.slice(2));
@@ -145,7 +146,8 @@ function readAppendedText(filePath, previousOffset) {
   }
 }
 
-function updateLastEvent(session, type, timestamp, details, turnId) {
+function updateLastEvent(session, type, timestamp, details, turnId, options = {}) {
+  const countAsActivity = options.countAsActivity !== false;
   session.lastEvent = {
     type,
     timestamp,
@@ -153,7 +155,9 @@ function updateLastEvent(session, type, timestamp, details, turnId) {
     ...(turnId ? { turnId } : {}),
   };
   session.lastUpdated = Math.max(session.lastUpdated || 0, timestamp);
-  session.lastActivityAt = Math.max(session.lastActivityAt || 0, timestamp);
+  if (countAsActivity) {
+    session.lastActivityAt = Math.max(session.lastActivityAt || 0, timestamp);
+  }
 }
 
 function getMessageText(payload) {
@@ -216,7 +220,8 @@ function applyEntry(session, entry) {
           "turn_complete",
           timestamp,
           payload.last_agent_message || "Turn complete",
-          payload.turn_id
+          payload.turn_id,
+          { countAsActivity: false }
         );
         return;
       case "agent_message":
@@ -227,7 +232,9 @@ function applyEntry(session, entry) {
       case "turn_aborted":
         session.status = "idle";
         session.endedAt = timestamp;
-        updateLastEvent(session, "turn_aborted", timestamp, "Turn aborted", undefined);
+        updateLastEvent(session, "turn_aborted", timestamp, "Turn aborted", undefined, {
+          countAsActivity: false,
+        });
         return;
       default:
         session.lastUpdated = Math.max(session.lastUpdated || 0, timestamp);
@@ -275,9 +282,16 @@ function mergeNotifyCache(session, notifyEntry) {
   }
 
   const timestamp = parseTimestamp(notifyEntry.lastUpdated || notifyEntry.timestamp || Date.now());
-  session.lastUpdated = Math.max(session.lastUpdated || 0, timestamp);
 
   if (notifyEntry.type === "agent-turn-complete") {
+    if (session.lastTaskStartAt && timestamp < session.lastTaskStartAt) {
+      return;
+    }
+    if (session.lastTaskCompleteAt && timestamp < session.lastTaskCompleteAt) {
+      return;
+    }
+
+    session.lastUpdated = Math.max(session.lastUpdated || 0, timestamp);
     session.status = "completed";
     session.lastTaskCompleteAt = Math.max(session.lastTaskCompleteAt || 0, timestamp);
     session.endedAt = timestamp;
@@ -286,7 +300,8 @@ function mergeNotifyCache(session, notifyEntry) {
       "turn_complete",
       timestamp,
       notifyEntry.lastAssistantMessage || session.lastEvent?.details || "Turn complete",
-      notifyEntry.turnId
+      notifyEntry.turnId,
+      { countAsActivity: false }
     );
   }
 }
@@ -298,6 +313,10 @@ function reconcileSession(session, thread, now) {
     session.lastTaskCompleteAt || 0,
     threadUpdatedAt || 0
   );
+  const hasOpenTask = Boolean(
+    session.lastTaskStartAt &&
+    (!session.lastTaskCompleteAt || session.lastTaskStartAt > session.lastTaskCompleteAt)
+  );
 
   session.sessionId = thread.id;
   session.workingDirectory = thread.cwd || session.workingDirectory;
@@ -308,26 +327,49 @@ function reconcileSession(session, thread, now) {
   session.lastUpdated = Math.max(session.lastUpdated || 0, freshestActivity);
 
   if (
-    session.status !== "completed" &&
+    hasOpenTask &&
+    now - freshestActivity < IN_PROGRESS_IDLE_MS
+  ) {
+    session.status = "working";
+    delete session.endedAt;
+    if (!session.lastEvent || session.lastEvent.type === "idle") {
+      updateLastEvent(
+        session,
+        "activity",
+        Math.max(session.lastTaskStartAt || 0, threadUpdatedAt || 0),
+        "Codex turn in progress",
+        undefined
+      );
+    }
+  } else if (
     now - threadUpdatedAt < ACTIVE_WINDOW_MS &&
     (!session.lastTaskCompleteAt || threadUpdatedAt > session.lastTaskCompleteAt)
   ) {
     session.status = "working";
+    delete session.endedAt;
     if (!session.lastEvent || session.lastEvent.type === "idle") {
       updateLastEvent(session, "activity", threadUpdatedAt, "Recent Codex activity", undefined);
     }
   }
 
-  if (session.status === "working" && now - freshestActivity > STALE_IDLE_MS) {
+  const idleAfterMs = hasOpenTask ? IN_PROGRESS_IDLE_MS : STALE_IDLE_MS;
+  if (session.status === "working" && now - freshestActivity > idleAfterMs) {
     session.status = "idle";
     session.endedAt = now;
-    updateLastEvent(session, "idle", now, "No recent Codex activity", undefined);
+    updateLastEvent(
+      session,
+      "idle",
+      now,
+      hasOpenTask ? "Codex activity stalled" : "No recent Codex activity",
+      undefined,
+      { countAsActivity: false }
+    );
   }
 
   if (session.status === "completed" && now - (session.lastTaskCompleteAt || 0) > COMPLETE_TO_IDLE_MS) {
     session.status = "idle";
     session.endedAt = now;
-    updateLastEvent(session, "idle", now, "Codex idle", undefined);
+    updateLastEvent(session, "idle", now, "Codex idle", undefined, { countAsActivity: false });
   }
 
   if (!session.startedAt) {
