@@ -3,6 +3,8 @@
 Local bridge that derives live Codex CLI status for Confirmo without waiting for
 official Codex lifecycle hooks to ship.
 
+[简体中文说明](./README.zh-CN.md)
+
 ## What It Does
 
 - Watches local Codex state in `~/.codex/state_5.sqlite`
@@ -19,6 +21,15 @@ official Codex lifecycle hooks to ship.
 - `bin/install.js`: installs the LaunchAgent, rewrites `~/.codex/config.toml`,
   and writes the Confirmo hook shim
 - `bin/patch-confirmo.js`: optional in-place patch for Confirmo's Codex monitor
+
+## Related Project
+
+This repository is an unofficial companion bridge for
+[`yetone/confirmo-releases`](https://github.com/yetone/confirmo-releases).
+
+- Upstream project: Confirmo by `yetone`
+- Scope of this repo: improve Codex CLI status integration on macOS
+- Relationship: not affiliated with, endorsed by, or maintained by `yetone`
 
 ## Why A Bridge Is Needed
 
