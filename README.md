@@ -25,9 +25,9 @@ official Codex lifecycle hooks to ship.
 ## Related Project
 
 This repository is an unofficial companion bridge for
-[`yetone/confirmo-releases`](https://github.com/yetone/confirmo-releases).
+[`yetone's Confirmo`](https://github.com/yetone/confirmo-releases).
 
-- Upstream project: Confirmo by `yetone`
+- Upstream project: [`yetone's Confirmo`](https://github.com/yetone/confirmo-releases)
 - Scope of this repo: improve Codex CLI status integration on macOS
 - Relationship: not affiliated with, endorsed by, or maintained by `yetone`
 
@@ -79,3 +79,7 @@ the safe state right now is:
 Backups created during local experiments are stored under:
 
 - `~/.confirmo/codex-bridge/backups`
+
+## License
+
+MIT. See [`LICENSE`](./LICENSE).

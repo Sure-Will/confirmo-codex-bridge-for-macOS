@@ -17,7 +17,7 @@ Codex CLI 状态识别能力，而不必等待 Codex 官方完整生命周期 ho
 
 这个仓库是面向 Confirmo 的**非官方适配项目**，对应的上游项目是：
 
-- Confirmo: [`yetone/confirmo-releases`](https://github.com/yetone/confirmo-releases)
+- Confirmo：[`yetone's Confirmo`](https://github.com/yetone/confirmo-releases)
 - 作者：`yetone`
 
 边界说明：
@@ -72,14 +72,10 @@ node bin/codex-bridge.js --once --verbose
 
 ## 许可证说明
 
-当前仓库还**没有**附带 `LICENSE` 文件。
+当前仓库使用的是 `MIT` 许可证，见 [LICENSE](./LICENSE)。
 
-如果你后面准备公开声明为开源项目，比较低争议的做法通常是：
+为了减少争议，建议继续保持这几个边界：
 
-- 给这个仓库单独添加自己的许可证
-- README 里明确它是面向 Confirmo 的非官方兼容项目
+- 这个仓库只发布你自己的桥接代码
+- README 明确它是面向 Confirmo 的非官方兼容项目
 - 不要把 Confirmo 的源码、资源、图标或二进制直接打包进来
-
-对这个项目类型来说，`MIT` 一般是比较简单、争议也相对小的选择；如果你想更明确写专利授权，
-可以考虑 `Apache-2.0`。这不是正式法律意见，但从开源实践上看，这两类都比“完全不写 LICENSE”
-更清晰。
