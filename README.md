@@ -1,6 +1,6 @@
 # confirmo-codex-bridge-for-macOS
 
-Local bridge that derives live Codex CLI status for Confirmo without waiting for
+Local bridge that derives live Codex CLI status for yetone's Confirmo without waiting for
 official Codex lifecycle hooks to ship.
 
 [简体中文说明](./README.zh-CN.md)
