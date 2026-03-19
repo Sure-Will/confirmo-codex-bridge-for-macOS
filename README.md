@@ -1,5 +1,8 @@
 # confirmo-codex-bridge-for-macOS
 
+Unofficial macOS bridge for Codex CLI and
+[`yetone's Confirmo`](https://github.com/yetone/confirmo-releases).
+
 Local bridge that derives live Codex CLI status for yetone's Confirmo without waiting for
 official Codex lifecycle hooks to ship.
 

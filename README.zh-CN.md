@@ -1,5 +1,8 @@
 # confirmo-codex-bridge-for-macOS
 
+面向 macOS 的非官方桥接层，用来连接 Codex CLI 与
+[`yetone's Confirmo`](https://github.com/yetone/confirmo-releases)。
+
 这是一个面向 macOS 的本地桥接项目，用来给 Confirmo 补上更稳定的
 Codex CLI 状态识别能力，而不必等待 Codex 官方完整生命周期 hooks 落地。
 
