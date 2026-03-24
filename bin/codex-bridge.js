@@ -7,12 +7,15 @@ const { execFileSync } = require("child_process");
 
 const HOME = os.homedir();
 const CODEX_STATE_DB = path.join(HOME, ".codex", "state_5.sqlite");
+const CODEX_SESSIONS_DIR = path.join(HOME, ".codex", "sessions");
 const BRIDGE_DIR = path.join(HOME, ".confirmo", "codex-bridge");
 const BRIDGE_STATE_FILE = path.join(BRIDGE_DIR, "bridge-state.json");
 const BRIDGE_NOTIFY_FILE = path.join(BRIDGE_DIR, "notify-cache.json");
 const OUTPUT_DIR = path.join(HOME, ".confirmo", "codex-status");
 const OUTPUT_STATUS_FILE = path.join(OUTPUT_DIR, "status.json");
 const OUTPUT_SESSIONS_DIR = path.join(OUTPUT_DIR, "sessions");
+const SQLITE_TEMP_PREFIX = path.join(os.tmpdir(), "confirmo-codex-state");
+const ROLLOUT_FILE_RE = /^rollout-.*-([0-9a-f-]{36})\.jsonl$/i;
 
 const POLL_MS = Number(process.env.CONFIRMO_CODEX_BRIDGE_POLL_MS || 1000);
 const ACTIVE_WINDOW_MS = Number(process.env.CONFIRMO_CODEX_ACTIVE_WINDOW_MS || 90000);
@@ -20,12 +23,14 @@ const COMPLETE_TO_IDLE_MS = Number(process.env.CONFIRMO_CODEX_COMPLETE_TO_IDLE_M
 const STALE_IDLE_MS = Number(process.env.CONFIRMO_CODEX_STALE_IDLE_MS || 120000);
 const IN_PROGRESS_IDLE_MS = Number(process.env.CONFIRMO_CODEX_IN_PROGRESS_IDLE_MS || 15 * 60 * 1000);
 const PRUNE_AFTER_MS = Number(process.env.CONFIRMO_CODEX_PRUNE_AFTER_MS || 24 * 60 * 60 * 1000);
+const STATE_DB_RETRY_MS = Number(process.env.CONFIRMO_CODEX_STATE_DB_RETRY_MS || 5 * 60 * 1000);
 
 const args = new Set(process.argv.slice(2));
 const ONCE = args.has("--once");
 const VERBOSE = args.has("--verbose");
 
 let running = false;
+let stateDbRetryAfter = 0;
 
 function log(...parts) {
   if (VERBOSE) {
@@ -81,16 +86,50 @@ function truncateText(value, maxLength = 200) {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
+function safeUnlink(filePath) {
+  try {
+    fs.unlinkSync(filePath);
+  } catch (_) {}
+}
+
+function copyFileIfExists(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) {
+    return false;
+  }
+
+  fs.copyFileSync(sourcePath, targetPath);
+  return true;
+}
+
+function withTempStateDb(callback) {
+  const tempBase = `${SQLITE_TEMP_PREFIX}-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const tempDbPath = `${tempBase}.sqlite`;
+  const tempWalPath = `${tempDbPath}-wal`;
+  const tempShmPath = `${tempDbPath}-shm`;
+
+  fs.copyFileSync(CODEX_STATE_DB, tempDbPath);
+  copyFileIfExists(`${CODEX_STATE_DB}-wal`, tempWalPath);
+  copyFileIfExists(`${CODEX_STATE_DB}-shm`, tempShmPath);
+
+  try {
+    return callback(tempDbPath);
+  } finally {
+    safeUnlink(tempDbPath);
+    safeUnlink(tempWalPath);
+    safeUnlink(tempShmPath);
+  }
+}
+
 function runSqlJson(sql) {
   if (!fs.existsSync(CODEX_STATE_DB)) {
     return [];
   }
 
-  const output = execFileSync(
+  const output = withTempStateDb((dbPath) => execFileSync(
     "sqlite3",
-    ["-readonly", "-json", CODEX_STATE_DB, sql],
+    ["-readonly", "-json", dbPath, sql],
     { encoding: "utf8" }
-  ).trim();
+  )).trim();
 
   if (!output) {
     return [];
@@ -111,6 +150,135 @@ function saveBridgeState(state) {
   writeJsonAtomic(BRIDGE_STATE_FILE, state);
 }
 
+function listRolloutFiles(dirPath, files = []) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      listRolloutFiles(entryPath, files);
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+function extractThreadIdFromRolloutPath(filePath) {
+  const match = path.basename(filePath).match(ROLLOUT_FILE_RE);
+  return match ? match[1] : null;
+}
+
+function extractUserMessage(entry, allowResponseUserMessage = false) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+
+  if (entry.type === "event_msg" && entry.payload?.type === "user_message") {
+    return truncateText(entry.payload.message || "", 120);
+  }
+
+  if (
+    allowResponseUserMessage &&
+    entry.type === "response_item" &&
+    entry.payload?.type === "message" &&
+    entry.payload?.role === "user"
+  ) {
+    return truncateText(getMessageText(entry.payload), 120);
+  }
+
+  return "";
+}
+
+function readRolloutMetadata(filePath) {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(512 * 1024);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const lines = buffer.toString("utf8", 0, bytesRead).split("\n");
+    const metadata = {
+      id: extractThreadIdFromRolloutPath(filePath),
+      cwd: "",
+      title: "",
+      firstUserMessage: "",
+    };
+    let seenTurnContext = false;
+    let fallbackUserMessage = "";
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch (_) {
+        continue;
+      }
+
+      if (entry.type === "session_meta") {
+        metadata.id = entry.payload?.id || metadata.id;
+        metadata.cwd = entry.payload?.cwd || metadata.cwd;
+      } else if (entry.type === "turn_context") {
+        seenTurnContext = true;
+        metadata.cwd = entry.payload?.cwd || metadata.cwd;
+      }
+
+      const userMessage = extractUserMessage(entry, seenTurnContext);
+      if (entry.type === "event_msg" && entry.payload?.type === "user_message" && userMessage) {
+        metadata.firstUserMessage = metadata.firstUserMessage || userMessage;
+        metadata.title = metadata.title || userMessage;
+      } else if (!metadata.firstUserMessage && userMessage) {
+        fallbackUserMessage = fallbackUserMessage || userMessage;
+      }
+
+      if (metadata.id && metadata.cwd && metadata.title) {
+        break;
+      }
+    }
+
+    if (!metadata.firstUserMessage && fallbackUserMessage) {
+      metadata.firstUserMessage = fallbackUserMessage;
+      metadata.title = metadata.title || fallbackUserMessage;
+    }
+
+    return metadata;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function listThreadsFromRollouts(limit = 50) {
+  if (!fs.existsSync(CODEX_SESSIONS_DIR)) {
+    return [];
+  }
+
+  return listRolloutFiles(CODEX_SESSIONS_DIR)
+    .map((filePath) => ({ filePath, mtimeMs: fs.statSync(filePath).mtimeMs }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, limit)
+    .map(({ filePath, mtimeMs }) => {
+      const metadata = readRolloutMetadata(filePath);
+      if (!metadata.id) {
+        return null;
+      }
+
+      return {
+        id: metadata.id,
+        rollout_path: filePath,
+        updated_at: mtimeMs,
+        cwd: metadata.cwd,
+        title: metadata.title,
+        first_user_message: metadata.firstUserMessage,
+      };
+    })
+    .filter(Boolean);
+}
+
 function listThreads() {
   const sql = [
     "select id, rollout_path, updated_at, cwd, title, first_user_message",
@@ -120,7 +288,20 @@ function listThreads() {
     "limit 50;",
   ].join(" ");
 
-  return runSqlJson(sql);
+  if (Date.now() < stateDbRetryAfter) {
+    return listThreadsFromRollouts(50);
+  }
+
+  try {
+    return runSqlJson(sql);
+  } catch (error) {
+    stateDbRetryAfter = Date.now() + STATE_DB_RETRY_MS;
+    console.error(
+      `[codex-bridge] Failed to query state DB, using rollout scan for ${Math.round(STATE_DB_RETRY_MS / 1000)}s:`,
+      error.message
+    );
+    return listThreadsFromRollouts(50);
+  }
 }
 
 function readAppendedText(filePath, previousOffset) {
@@ -488,6 +669,8 @@ function cycle() {
     pruneSessions(state, now);
     saveBridgeState(state);
     writeOutput(state, now);
+  } catch (error) {
+    console.error("[codex-bridge] Poll cycle failed:", error);
   } finally {
     running = false;
   }

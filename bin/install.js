@@ -6,7 +6,6 @@ const path = require("path");
 
 const HOME = os.homedir();
 const REPO_ROOT = path.resolve(__dirname, "..");
-const NODE_BIN = process.execPath;
 const BRIDGE_DIR = path.join(HOME, ".confirmo", "codex-bridge");
 const BACKUP_DIR = path.join(BRIDGE_DIR, "backups");
 const CONFIRMO_HOOKS_DIR = path.join(HOME, ".confirmo", "hooks");
@@ -14,10 +13,28 @@ const CONFIRMO_HOOK_PATH = path.join(CONFIRMO_HOOKS_DIR, "confirmo-codex-hook.js
 const LAUNCH_AGENTS_DIR = path.join(HOME, "Library", "LaunchAgents");
 const LAUNCH_AGENT_PATH = path.join(LAUNCH_AGENTS_DIR, "com.sure.confirmo.codex-bridge.plist");
 const CODEX_CONFIG_PATH = path.join(HOME, ".codex", "config.toml");
+const NODE_BIN = resolveNodeBin();
 const NOTIFY_COMMAND = [
   NODE_BIN,
   CONFIRMO_HOOK_PATH,
 ];
+
+function resolveNodeBin() {
+  const candidates = [
+    process.env.CONFIRMO_CODEX_BRIDGE_NODE,
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+    process.execPath,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return process.execPath;
+}
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
