@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const { pathToFileURL } = require("url");
 
 const HOME = os.homedir();
 const CODEX_STATE_DB = path.join(HOME, ".codex", "state_5.sqlite");
@@ -120,6 +121,10 @@ function withTempStateDb(callback) {
   }
 }
 
+function toReadonlySqliteUri(filePath) {
+  return `${pathToFileURL(filePath).href}?mode=ro&immutable=1`;
+}
+
 function runSqlJson(sql) {
   if (!fs.existsSync(CODEX_STATE_DB)) {
     return [];
@@ -127,7 +132,7 @@ function runSqlJson(sql) {
 
   const output = withTempStateDb((dbPath) => execFileSync(
     "sqlite3",
-    ["-readonly", "-json", dbPath, sql],
+    ["-json", toReadonlySqliteUri(dbPath), sql],
     { encoding: "utf8" }
   )).trim();
 
@@ -321,7 +326,32 @@ function readAppendedText(filePath, previousOffset) {
   try {
     const buffer = Buffer.alloc(length);
     fs.readSync(fd, buffer, 0, length, safeOffset);
-    return { text: buffer.toString("utf8"), nextOffset: stat.size };
+    let startIndex = 0;
+
+    if (safeOffset > 0) {
+      const previousByte = Buffer.alloc(1);
+      fs.readSync(fd, previousByte, 0, 1, safeOffset - 1);
+      if (previousByte[0] !== 0x0a) {
+        const firstNewlineIndex = buffer.indexOf(0x0a);
+        if (firstNewlineIndex === -1) {
+          return { text: "", nextOffset: safeOffset };
+        }
+        startIndex = firstNewlineIndex + 1;
+      }
+    }
+
+    const lastNewlineIndex = buffer.lastIndexOf(0x0a);
+    if (lastNewlineIndex === -1) {
+      return { text: "", nextOffset: safeOffset };
+    }
+    if (lastNewlineIndex < startIndex) {
+      return { text: "", nextOffset: safeOffset + startIndex };
+    }
+
+    return {
+      text: buffer.toString("utf8", startIndex, lastNewlineIndex + 1),
+      nextOffset: safeOffset + lastNewlineIndex + 1,
+    };
   } finally {
     fs.closeSync(fd);
   }
