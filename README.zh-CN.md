@@ -13,6 +13,8 @@ Codex CLI 状态识别能力，而不必等待 Codex 官方完整生命周期 ho
 - 读取本地 `~/.codex/state_5.sqlite`
 - 读取 `~/.codex/sessions/...` 下的 rollout JSONL 事件
 - 推导 `working`、`completed`、`idle` 三种会话状态
+- 将 `turn_aborted` 视为已中断且已结束的 turn，避免在 Codex CLI 按下
+  `Esc` 后 Confirmo 还长时间卡在 `working`
 - 将状态写入 `~/.confirmo/codex-status/`
 - 安装一个很薄的用户级 shim，让 Codex completion 事件进入这个仓库维护的桥接层
 
@@ -45,6 +47,10 @@ Codex CLI 当前公开可配置的 `notify` 更偏向 “turn 完成后通知”
 这个仓库直接利用这些本地状态，给 Confirmo 输出更稳定的 `working` / `completed` / `idle`
 识别结果。
 
+现在它也会更正确地处理 `turn_aborted`。如果你在 Codex CLI 里按 `Esc`
+中断当前回答，bridge 会把这次 turn 当作已经结束，而不是又被后续重算逻辑误判成
+仍在 `working`。
+
 ## 安装
 
 在仓库目录里执行：
@@ -65,6 +71,14 @@ launchctl load ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist
 
 ```bash
 node bin/codex-bridge.js --once --verbose
+```
+
+如果你已经装过 bridge，只是更新了这个仓库里的代码，记得重载一下 LaunchAgent，
+让 `launchd` 使用新的 bridge 逻辑：
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist
 ```
 
 ## 当前限制

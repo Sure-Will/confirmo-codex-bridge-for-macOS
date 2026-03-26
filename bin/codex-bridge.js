@@ -442,6 +442,9 @@ function applyEntry(session, entry) {
         return;
       case "turn_aborted":
         session.status = "idle";
+        // Treat an interrupted turn as closed so reconciliation does not
+        // resurrect it as "working" until the stale timeout expires.
+        session.lastTaskCompleteAt = Math.max(session.lastTaskCompleteAt || 0, timestamp);
         session.endedAt = timestamp;
         updateLastEvent(session, "turn_aborted", timestamp, "Turn aborted", undefined, {
           countAsActivity: false,

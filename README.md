@@ -13,6 +13,8 @@ official Codex lifecycle hooks to ship.
 - Watches local Codex state in `~/.codex/state_5.sqlite`
 - Reads rollout JSONL events from `~/.codex/sessions/...`
 - Derives `working`, `completed`, and `idle` session states
+- Treats `turn_aborted` as a closed interrupted turn so Confirmo does not stay
+  stuck in `working` after pressing `Esc` in Codex CLI
 - Writes Confirmo-compatible status files to `~/.confirmo/codex-status/`
 - Installs a tiny shim at `~/.confirmo/hooks/confirmo-codex-hook.js` so Codex
   forwards completions into this repo instead of fighting Confirmo's stock hook
@@ -46,6 +48,10 @@ Confirmo 1.0.88 also under-handles Codex `working` states in its bundled
 the pet to visibly enter the "working" state for Codex instead of only reacting
 to completions.
 
+This repo also handles interrupted turns more cleanly. When Codex CLI emits
+`turn_aborted` because you pressed `Esc`, the bridge now closes that turn
+instead of letting reconciliation revive it as stale `working` activity.
+
 ## Install
 
 From this repo:
@@ -66,6 +72,14 @@ To test one cycle without launchd:
 
 ```bash
 node bin/codex-bridge.js --once --verbose
+```
+
+If you already installed the bridge and only updated the repo code, reload the
+LaunchAgent so `launchd` picks up the new bridge logic:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.sure.confirmo.codex-bridge.plist
 ```
 
 ## Confirmo Patch Status
